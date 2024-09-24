@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  step-functions
+
+  Sample SAM Template for step-functions
+Globals:
+  Function:
+    Timeout: 20
+    Runtime: nodejs20.x
+
+Resources:
+  LoginVerificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: verifyLogin.handler
+      CodeUri: ./login
+      Events:
+        LoginApi:
+          Type: Api
+          Properties:
+            Path: /login/{email}/{password}
+            Method: POST
+
+  GenerateTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./login
+      Handler: generateToken.handler
+      Layers:
+        - !Ref LambdaDependencies
+
+  LoginWorkflowFunction:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Type: STANDARD
+      DefinitionUri: state/validator.asl.json
+      DefinitionSubstitutions:
+        LoginVerificationFunctionArn: !GetAtt LoginVerificationFunction.Arn
+        GenerateTokenFunctionArn: !GetAtt GenerateTokenFunction.Arn
+      Role: !GetAtt StepFunctionExecutionRole.Arn
+      Name: "LoginWorkflowStepFunction"
+
+  LambdaDependencies:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: sam-dependencies
+      ContentUri: dependencies/
+      CompatibleRuntimes:
+        - nodejs20.x
+      LicenseInfo: "MIT"
+      RetentionPolicy: delete
+    Metadata:
+      BuildMethod: nodejs20.x
+      BuildProperties:
+        PackageManager: npm
+        LayerPackaging: true
+
+  StepFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "states.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "StepFunctionsExecutionPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "lambda:InvokeFunction"
+                  - "states:StartExecution"
+                Resource:
+                  - !GetAtt LoginVerificationFunction.Arn
+                  - !GetAtt GenerateTokenFunction.Arn
